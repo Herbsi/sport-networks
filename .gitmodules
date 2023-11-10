@@ -1,0 +1,3 @@
+[submodule "external/Big-Data-Cup-2022"]
+	path = external/Big-Data-Cup-2022
+	url = https://github.com/Herbsi/Big-Data-Cup-2022
