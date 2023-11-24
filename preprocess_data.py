@@ -20,6 +20,7 @@ TRACKING_DIR = "external/Big-Data-Cup-2022/data"
 PBP_DIR = "external/Big-Data-Cup-2022/data"
 PLAY_BY_PLAY_DATA_FILE = "pxp_womens_oly_2022_v2.csv"
 POWER_PLAY_INFO_FILE = "pp_info.csv"
+MAX_PENALTY_NUMBER = 8  # Determined from file.
 GAMES = [
     "2022-02-08 Canada at USA",
     "2022-02-08 ROC at Finland",
@@ -31,20 +32,70 @@ GAMES = [
 
 
 def main():
+    # Read Play-By-Play and Power-Play-Info files and adjust clock values to make filtering down below easier
     play_by_play_data = pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE))
+    power_play_info = pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE))
 
-    def build_networks(game, venue=None, power_play=False):
-        game = Game(game)
+    def build_networks(
+        game: Game,
+        venue: Venue = Venue.HOME,
+        situation: Situation | None = Situation.REGULAR,
+        pp: PowerPlay | None = None,
+    ):
+        """Parameters allow for creating different pass networks.
+
+        Default parameters create the passing network in 5 on 5 situations of the home team.
+
+        """
         roster_info = pd.read_csv(game.roster_file, index_col=0)
-
         events = play_by_play_data[play_by_play_data["game_date"] == game.game_date]
-        if venue == Venue.HOME:
-            events = events[events["team_name"] == game.home]
-        elif venue == Venue.AWAY:
-            events = events[events["team_name"] == game.away]
+        match venue:
+            case venue.HOME:
+                events = events[events["team_name"] == game.home]
+            case venue.AWAY:
+                events = events[events["team_name"] == game.away]
 
-        # TODO Filter for power plays
         passes = events[events["event"] == "Play"]
+        # TODO: Situation needs more care
+        if situation is not None:
+            passes = passes[passes["situation_type"] == situation.value]
+
+        if pp is not None:
+            # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
+            # If it does not exist; just return None because there is no network to build.
+            try:
+                pp = power_play_info[
+                    (power_play_info["game_name"] == game.game)
+                    & (power_play_info["penalty_number"] == pp.penalty_no)
+                ].iloc[0]
+            except IndexError:
+                # TODO Return something more graceful.
+                return None
+
+            # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
+            if pp["start_period"] != pp["end_period"]:
+                # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
+                passes = passes[
+                    (
+                        (passes["period"] == pp["start_period"])
+                        & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
+                    )
+                    # or passes in the end_period with the clock above the end time of the PP
+                    | (
+                        (passes["period"] == pp["end_period"])
+                        & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
+                    )
+                ]
+
+            else:
+                # Take passes in the same period (start_period == end_period except for the one exception)
+                # and PP-Start above current time and PP-END below current time
+                passes = passes[
+                    (passes["period"] == pp["start_period"])
+                    & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
+                    & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
+                ]
+
         passes = passes.join(roster_info, on="player_name").join(
             roster_info, on="player_name_2", rsuffix="_2"
         )
@@ -73,9 +124,58 @@ def main():
             "player_pass_network": create_graph("player_name"),
         }
 
-    for game, venue in itertools.product(GAMES, [Venue.HOME, Venue.AWAY]):
-        print(f"Processing game {game}; venue {venue}.")
-        build_networks(game, venue)
+    ################################################################################
+    # Actual Main code                                                             #
+    ################################################################################
+
+    # Count the various combinations encountered below.
+    empty_networks = 0
+    disconnected_networks = 0
+    disconnected_networks_pp = 0
+    connected_networks = 0
+    pp_count = 0
+    total_posibilities = 0
+
+    # Generate (most?) networks that are potentially of interest.
+    # Basically poor-mans-stats at this point
+    for game, venue, (situation, pp) in itertools.product(
+        GAMES,
+        [Venue.HOME, Venue.AWAY],
+        [(Situation.REGULAR, None)]
+        + [
+            (None, PowerPlay(penalty_no))
+            for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)
+        ],
+    ):
+        res = build_networks(Game(game), venue=venue, situation=situation, pp=pp)
+        if res is None:
+            # Happens if there is for example no 7th PP in a game.
+            continue
+
+        total_posibilities += 1
+
+        if pp is not None:
+            pp_count += 1
+
+        if res["position_pass_network"].number_of_nodes() == 0:
+            empty_networks += 1
+            continue
+
+        if res["position_pass_network"].number_of_nodes() < 5:
+            disconnected_networks += 1
+            if pp is not None:
+                disconnected_networks_pp += 1
+            continue
+
+        connected_networks += 1
+
+    print(f"Connected: {connected_networks} / {total_posibilities}")
+    print(f"Empty Networks: {empty_networks} / {total_posibilities}")
+    print(f"Disconnected Networks: {disconnected_networks} / {total_posibilities}")
+    print(f"Empty Networks out of PP situations: {empty_networks} / {pp_count}")
+    print(
+        f"Disconnected Networks out of PP situations: {disconnected_networks_pp} / {pp_count}"
+    )
 
 
 def directed_to_undirected(digraph):
@@ -97,6 +197,13 @@ class Venue(Enum):
     AWAY = "away"
 
 
+class Situation(Enum):
+    # NOTE: POWER_PLAY and PENALTY_KILL probably do not make much sense because they aggregate across multiple power plays.
+    REGULAR = "5 on 5"
+    POWER_PLAY = "5 on 4"
+    PENALTY_KILL = "4 on 5"
+
+
 class Game:
     def __init__(self, game):
         [dt, away, _, home] = game.split(" ")
@@ -112,6 +219,11 @@ class Game:
     @property
     def roster_file(self):
         return os.path.join(TRACKING_DIR, self.game, f"{self.game} roster.csv")
+
+
+class PowerPlay:
+    def __init__(self, penalty_no):
+        self.penalty_no = penalty_no
 
 
 if __name__ == "__main__":
