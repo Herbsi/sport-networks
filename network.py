@@ -24,6 +24,10 @@ def clustering(G: nx.Graph | nx.DiGraph) -> float:
     return nx.average_clustering(G, weight="weight")
 
 
+def centrality(G: nx.Graph | nx.DiGraph, u=None) -> float:
+    return nx.closeness_centrality(G, u, distance="weight")
+
+
 # Disruption Features
 def _disruption_feature(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None, feature: Callable[[nx.Graph | nx.DiGraph], float | int]) -> float:
     # TODO: All nodes are weighted equally for the disruption feature, in contrast to the Haka-Network paper’s use of the disruption frequency d_{u, t_2, g}.
@@ -57,3 +61,13 @@ def disruption_number_connected_components(G: nx.Graph | nx.DiGraph, nodes: list
 
 def disruption_clustering(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None) -> float:
     return _disruption_feature(G, nodes, number_connected_components)
+
+
+def disruption_centrality(G: nx.Graph | nx.DiGraph):
+    # TODO: Haka-Network Paper weighs centrality(G, u) by d_{u, t2, g}, the disruption frequency of node u
+    # So right now, a more apt name would be "average_centrality".
+    mean = 0.0
+    for node in G.nodes:
+        mean += centrality(G, node)
+
+    return mean / G.number_of_nodes()
