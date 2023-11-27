@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
-import pandas as pd
-import os
-import networkx as nx
-import itertools
-
 from datetime import date
 from enum import Enum
+import itertools
+import networkx as nx
+import os
+from pathlib import Path
+import pickle
+
+import pandas as pd
 
 # Matching dictionary for team names between events and tracking data
 TEAM_NAMES = {
@@ -136,6 +138,9 @@ def main():
     pp_count = 0
     total_posibilities = 0
 
+    dir = Path("./data/networks")
+    dir.mkdir(parents=True, exist_ok=True)  # Create directory if it does not exist
+
     # Generate (most?) networks that are potentially of interest.
     # Basically poor-mans-stats at this point
     for game, venue, (situation, pp) in itertools.product(
@@ -168,6 +173,11 @@ def main():
             continue
 
         connected_networks += 1
+
+        # write to disk
+        file = Path(f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle")
+        with open(dir / file, "wb") as f:
+            pickle.dump(res, f)
 
     print(f"Connected: {connected_networks} / {total_posibilities}")
     print(f"Empty Networks: {empty_networks} / {total_posibilities}")
