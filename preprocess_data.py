@@ -32,98 +32,6 @@ GAMES = [
 
 
 def main():
-    # Read Play-By-Play and Power-Play-Info files and adjust clock values to make filtering down below easier
-    play_by_play_data = pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE))
-    power_play_info = pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE))
-
-    def build_networks(
-        game: Game,
-        venue: Venue = Venue.HOME,
-        situation: Situation | None = Situation.REGULAR,
-        pp: PowerPlay | None = None,
-    ):
-        """Parameters allow for creating different pass networks.
-
-        Default parameters create the passing network in 5 on 5 situations of the home team.
-
-        """
-        roster_info = pd.read_csv(game.roster_file, index_col=0)
-        events = play_by_play_data[play_by_play_data["game_date"] == game.game_date]
-        match venue:
-            case venue.HOME:
-                events = events[events["team_name"] == game.home]
-            case venue.AWAY:
-                events = events[events["team_name"] == game.away]
-
-        passes = events[events["event"] == "Play"]
-        # TODO: Situation needs more care
-        if situation is not None:
-            passes = passes[passes["situation_type"] == situation.value]
-
-        if pp is not None:
-            # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
-            # If it does not exist; just return None because there is no network to build.
-            try:
-                pp = power_play_info[
-                    (power_play_info["game_name"] == game.game)
-                    & (power_play_info["penalty_number"] == pp.penalty_no)
-                ].iloc[0]
-            except IndexError:
-                # TODO Return something more graceful.
-                return None
-
-            # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
-            if pp["start_period"] != pp["end_period"]:
-                # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
-                passes = passes[
-                    (
-                        (passes["period"] == pp["start_period"])
-                        & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
-                    )
-                    # or passes in the end_period with the clock above the end time of the PP
-                    | (
-                        (passes["period"] == pp["end_period"])
-                        & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
-                    )
-                ]
-
-            else:
-                # Take passes in the same period (start_period == end_period except for the one exception)
-                # and PP-Start above current time and PP-END below current time
-                passes = passes[
-                    (passes["period"] == pp["start_period"])
-                    & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
-                    & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
-                ]
-
-        passes = passes.join(roster_info, on="player_name").join(
-            roster_info, on="player_name_2", rsuffix="_2"
-        )
-        passes = passes.loc[
-            :, ["team_name", "player_name", "position", "player_name_2", "position_2"]
-        ]
-
-        def create_graph(factor):
-            # factor is either "position" or "player_name"
-            passes_by_factor = (
-                passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
-            )
-            return nx.DiGraph(
-                passes_by_factor.apply(
-                    lambda row: (
-                        row[factor],
-                        row[f"{factor}_2"],
-                        {"weight": row["count"]},
-                    ),
-                    axis=1,
-                )
-            )
-
-        return {
-            "position_pass_network": create_graph("position"),
-            "player_pass_network": create_graph("player_name"),
-        }
-
     ################################################################################
     # Actual Main code                                                             #
     ################################################################################
@@ -136,14 +44,15 @@ def main():
     pp_count = 0
     total_posibilities = 0
 
-    # Generate (most?) networks that are potentially of interest.
-    # Basically poor-mans-stats at this point
+    # Generate some combinations of potential networks.
+    # Some of them are empty,
+    # e.g. Venue.HOME, Situation.POWER_PLAY, PowerPlay(1) but Venue.HOME is PENALTY_KILL in that Power Play.
     for game, venue, (situation, pp) in itertools.product(
         GAMES,
         [Venue.HOME, Venue.AWAY],
         [(Situation.REGULAR, None)]
         + [
-            (None, PowerPlay(penalty_no))
+            (Situation.POWER_PLAY, PowerPlay(penalty_no))
             for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)
         ],
     ):
@@ -198,7 +107,6 @@ class Venue(Enum):
 
 
 class Situation(Enum):
-    # NOTE: POWER_PLAY and PENALTY_KILL probably do not make much sense because they aggregate across multiple power plays.
     REGULAR = "5 on 5"
     POWER_PLAY = "5 on 4"
     PENALTY_KILL = "4 on 5"
@@ -224,6 +132,98 @@ class Game:
 class PowerPlay:
     def __init__(self, penalty_no):
         self.penalty_no = penalty_no
+
+
+def build_networks(
+    game: Game,
+    venue: Venue = Venue.HOME,
+    situation: Situation | None = Situation.REGULAR,
+    pp: PowerPlay | None = None,
+    play_by_play_data=pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE)),
+    power_play_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE)),
+):
+    """Parameters allow for creating different pass networks.
+
+    Default parameters create the passing network in 5 on 5 situations of the home team.
+
+    """
+    roster_info = pd.read_csv(game.roster_file, index_col=0)
+    events = play_by_play_data[play_by_play_data["game_date"] == game.game_date]
+    match venue:
+        case venue.HOME:
+            events = events[events["team_name"] == game.home]
+        case venue.AWAY:
+            events = events[events["team_name"] == game.away]
+
+    passes = events[events["event"] == "Play"]
+
+    if situation is not None:
+        passes = passes[passes["situation_type"] == situation.value]
+
+    if pp is not None:
+        # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
+        # If it does not exist; just return None because there is no network to build.
+        try:
+            pp = power_play_info[
+                (power_play_info["game_name"] == game.game)
+                & (power_play_info["penalty_number"] == pp.penalty_no)
+            ].iloc[0]
+        except IndexError:
+            # TODO Return something more graceful.
+            return None
+
+        # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
+        if pp["start_period"] != pp["end_period"]:
+            # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
+            passes = passes[
+                (
+                    (passes["period"] == pp["start_period"])
+                    & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
+                )
+                # or passes in the end_period with the clock above the end time of the PP
+                | (
+                    (passes["period"] == pp["end_period"])
+                    & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
+                )
+            ]
+
+        else:
+            # Take passes in the same period (start_period == end_period except for the one exception)
+            # and PP-Start above current time and PP-END below current time
+            passes = passes[
+                (passes["period"] == pp["start_period"])
+                & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
+                & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
+            ]
+
+    passes = passes.join(roster_info, on="player_name").join(
+        roster_info, on="player_name_2", rsuffix="_2"
+    )
+    passes = passes.loc[
+        :, ["team_name", "player_name", "position", "player_name_2", "position_2"]
+    ]
+
+    def create_graph(factor):
+        # factor is either "position" or "player_name"
+        passes_by_factor = (
+            passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
+        )
+        return nx.DiGraph(
+            passes_by_factor.apply(
+                lambda row: (
+                    row[factor],
+                    row[f"{factor}_2"],
+                    # Edge Weights are normalized by total amount of passes.
+                    {"weight": row["count"] / len(passes)},
+                ),
+                axis=1,
+            )
+        )
+
+    return {
+        "position_pass_network": create_graph("position"),
+        "player_pass_network": create_graph("player_name"),
+    }
 
 
 if __name__ == "__main__":
