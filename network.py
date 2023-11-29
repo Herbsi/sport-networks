@@ -24,9 +24,11 @@ def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool=F
             pass
 
     # Now, after removing other stuff, normalise edge weights.
-    total_edge_weight = sum(e[2] for e in G.edges.data("weight"))
-    for u, v in G.edges:
-        G.edges[u, v]["weight"] /= total_edge_weight
+    total_edge_weight = sum(w for (_, _, w) in G.edges.data("weight"))
+    for (u, v, weight) in G.edges.data("weight"):
+        # Use reciprocal of passing fraction as weight.
+        # This way, lower weight means more passes between players, which is more easily interpreted as "close"
+        G.edges[u, v]["weight"] = total_edge_weight / weight
 
     return G
 

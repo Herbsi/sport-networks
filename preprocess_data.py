@@ -226,7 +226,6 @@ def build_networks(
                 lambda row: (
                     row[factor],
                     row[f"{factor}_2"],
-                    # Edge Weights are normalized by total amount of passes.
                     {"weight": row["count"]},
                 ),
                 axis=1,
