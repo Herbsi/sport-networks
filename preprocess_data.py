@@ -84,7 +84,9 @@ def main():
         connected_networks += 1
 
         # write to disk
-        file = Path(f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle")
+        file = Path(
+            f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle"
+        )
         with open(dir / file, "wb") as f:
             pickle.dump(res, f)
 
@@ -218,17 +220,19 @@ def build_networks(
         passes_by_factor = (
             passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
         )
-        return nx.DiGraph(
+
+        graph = nx.DiGraph(
             passes_by_factor.apply(
                 lambda row: (
                     row[factor],
                     row[f"{factor}_2"],
                     # Edge Weights are normalized by total amount of passes.
-                    {"weight": row["count"] / len(passes)},
+                    {"weight": row["count"]},
                 ),
                 axis=1,
             )
         )
+        return graph
 
     return {
         "position_pass_network": create_graph("position"),
