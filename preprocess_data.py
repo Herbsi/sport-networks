@@ -144,7 +144,7 @@ def build_networks(
     situation: Situation | None = Situation.REGULAR,
     pp: PowerPlay | None = None,
     play_by_play_data=pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE)),
-    power_play_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE)),
+    power_play_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
 ):
     """Parameters allow for creating different pass networks.
 
