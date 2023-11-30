@@ -4,7 +4,7 @@ from collections.abc import Callable
 from preprocess_data import directed_to_undirected
 
 
-def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool=False):
+def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
     # Do not make undirected by default
     # TODO: I am not sure what makes more sense for our analysis; Haka generally considered the graph as directed; so, put it behind a flag for now
     if make_undirected:
@@ -83,28 +83,20 @@ def _disruption_feature(
     return mean / len(nodes)
 
 
-def disruption_connectivity(
-    G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None
-) -> float:
+def disruption_connectivity(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None) -> float:
     """Return average connectivity of `G' when `nodes' are removed.  Defaults to averaging over removing every node."""
     return _disruption_feature(G, nodes, connectivity)
 
 
-def disruption_assortativity(
-    G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None
-) -> float:
+def disruption_assortativity(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None) -> float:
     return _disruption_feature(G, nodes, assortativity)
 
 
-def disruption_number_connected_components(
-    G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None
-) -> float:
+def disruption_number_connected_components(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None) -> float:
     return _disruption_feature(G, nodes, number_connected_components)
 
 
-def disruption_clustering(
-    G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None
-) -> float:
+def disruption_clustering(G: nx.Graph | nx.DiGraph, nodes: list[Any] | None = None) -> float:
     return _disruption_feature(G, nodes, number_connected_components)
 
 

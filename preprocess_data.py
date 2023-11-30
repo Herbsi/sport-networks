@@ -56,10 +56,7 @@ def main():
         GAMES,
         [Venue.HOME, Venue.AWAY],
         [(Situation.REGULAR, None)]
-        + [
-            (Situation.POWER_PLAY, PowerPlay(penalty_no))
-            for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)
-        ],
+        + [(Situation.POWER_PLAY, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)],
     ):
         res = build_networks(Game(game), venue=venue, situation=situation, pp=pp)
         if res is None:
@@ -84,9 +81,7 @@ def main():
         connected_networks += 1
 
         # write to disk
-        file = Path(
-            f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle"
-        )
+        file = Path(f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle")
         with open(dir / file, "wb") as f:
             pickle.dump(res, f)
 
@@ -94,9 +89,7 @@ def main():
     print(f"Empty Networks: {empty_networks} / {total_posibilities}")
     print(f"Disconnected Networks: {disconnected_networks} / {total_posibilities}")
     print(f"Empty Networks out of PP situations: {empty_networks} / {pp_count}")
-    print(
-        f"Disconnected Networks out of PP situations: {disconnected_networks_pp} / {pp_count}"
-    )
+    print(f"Disconnected Networks out of PP situations: {disconnected_networks_pp} / {pp_count}")
 
 
 def directed_to_undirected(digraph):
@@ -177,8 +170,7 @@ def build_networks(
         # If it does not exist; just return None because there is no network to build.
         try:
             pp = power_play_info[
-                (power_play_info["game_name"] == game.game)
-                & (power_play_info["penalty_number"] == pp.penalty_no)
+                (power_play_info["game_name"] == game.game) & (power_play_info["penalty_number"] == pp.penalty_no)
             ].iloc[0]
         except IndexError:
             # TODO Return something more graceful.
@@ -188,15 +180,9 @@ def build_networks(
         if pp["start_period"] != pp["end_period"]:
             # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
             passes = passes[
-                (
-                    (passes["period"] == pp["start_period"])
-                    & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
-                )
+                ((passes["period"] == pp["start_period"]) & (pp["start_game_clock_seconds"] >= passes["clock_seconds"]))
                 # or passes in the end_period with the clock above the end time of the PP
-                | (
-                    (passes["period"] == pp["end_period"])
-                    & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
-                )
+                | ((passes["period"] == pp["end_period"]) & (passes["clock_seconds"] >= pp["end_game_clock_seconds"]))
             ]
 
         else:
@@ -208,18 +194,12 @@ def build_networks(
                 & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
             ]
 
-    passes = passes.join(roster_info, on="player_name").join(
-        roster_info, on="player_name_2", rsuffix="_2"
-    )
-    passes = passes.loc[
-        :, ["team_name", "player_name", "position", "player_name_2", "position_2"]
-    ]
+    passes = passes.join(roster_info, on="player_name").join(roster_info, on="player_name_2", rsuffix="_2")
+    passes = passes.loc[:, ["team_name", "player_name", "position", "player_name_2", "position_2"]]
 
     def create_graph(factor):
         # factor is either "position" or "player_name"
-        passes_by_factor = (
-            passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
-        )
+        passes_by_factor = passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
 
         graph = nx.DiGraph(
             passes_by_factor.apply(
