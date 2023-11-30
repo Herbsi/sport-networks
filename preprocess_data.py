@@ -3,11 +3,11 @@
 from datetime import date
 from enum import Enum
 import itertools
-import networkx as nx
 import os
 from pathlib import Path
 import pickle
 
+import networkx as nx
 import pandas as pd
 
 # Matching dictionary for team names between events and tracking data
@@ -99,9 +99,8 @@ def directed_to_undirected(digraph):
     for node in digraph:
         for ngbr in nx.neighbors(digraph, node):
             if node in nx.neighbors(digraph, ngbr):
-                graph.edges[node, ngbr]["weight"] = (
-                    digraph.edges[node, ngbr]["weight"]
-                    + digraph.edges[ngbr, node]["weight"]
+                graph.edges[node, ngbr]["n_passes"] = (
+                    digraph.edges[node, ngbr]["n_passes"] + digraph.edges[ngbr, node]["n_passes"]
                 )
     return graph
 
@@ -206,7 +205,7 @@ def build_networks(
                 lambda row: (
                     row[factor],
                     row[f"{factor}_2"],
-                    {"weight": row["count"]},
+                    {"n_passes": row["count"]},
                 ),
                 axis=1,
             )

@@ -24,11 +24,11 @@ def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool =
             pass
 
     # Now, after removing other stuff, normalise edge weights.
-    total_edge_weight = sum(w for (_, _, w) in G.edges.data("weight"))
-    for (u, v, weight) in G.edges.data("weight"):
+    total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
+    for u, v, n_passes in G.edges.data("n_passes"):
         # Use reciprocal of passing fraction as weight.
         # This way, lower weight means more passes between players, which is more easily interpreted as "close"
-        G.edges[u, v]["weight"] = total_edge_weight / weight
+        G.edges[u, v]["distance"] = total_passes / n_passes
 
     return G
 
@@ -40,7 +40,8 @@ def connectivity(G: nx.Graph | nx.DiGraph) -> float:
 
 
 def assortativity(G: nx.Graph | nx.DiGraph) -> float:
-    return nx.degree_assortativity_coefficient(G, weight="weight")
+    # TODO: not sure if inverse weight would make more sense here too
+    return nx.degree_assortativity_coefficient(G, weight="n_passes")
 
 
 def number_connected_components(G: nx.Graph | nx.DiGraph) -> int:
@@ -54,11 +55,11 @@ def number_connected_components(G: nx.Graph | nx.DiGraph) -> int:
 
 
 def clustering(G: nx.Graph | nx.DiGraph) -> float:
-    return nx.average_clustering(G, weight="weight")
+    return nx.average_clustering(G, weight="n_passes")  # TODO: I think weight="n_passes" is correct here, but not sure
 
 
 def centrality(G: nx.Graph | nx.DiGraph, u=None) -> float:
-    return nx.closeness_centrality(G, u, distance="weight", wf_improved=False)
+    return nx.closeness_centrality(G, u, distance="distance", wf_improved=False)
 
 
 # Disruption Features
