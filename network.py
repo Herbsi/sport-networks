@@ -40,7 +40,7 @@ def connectivity(G: nx.Graph | nx.DiGraph) -> float:
 
 
 def assortativity(G: nx.Graph | nx.DiGraph) -> float:
-    # TODO: not sure if inverse weight would make more sense here too
+    # TODO: not sure if weight="distance" would make more sense here too
     return nx.degree_assortativity_coefficient(G, weight="n_passes")
 
 
