@@ -208,7 +208,8 @@ def build_networks(
                     {"n_passes": row["count"]},
                 ),
                 axis=1,
-            )
+            ),
+            name=f"{game.game}_{venue.value}_{f'pp{pp.penalty_no}' if pp is not None else 'regular'}",
         )
         return graph
 
