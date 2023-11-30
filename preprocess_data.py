@@ -168,7 +168,7 @@ def build_networks(
         # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
         # If it does not exist; just return None because there is no network to build.
         try:
-            pp = power_play_info[
+            pp_df = power_play_info[
                 (power_play_info["game_name"] == game.game) & (power_play_info["penalty_number"] == pp.penalty_no)
             ].iloc[0]
         except IndexError:
@@ -176,21 +176,27 @@ def build_networks(
             return None
 
         # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
-        if pp["start_period"] != pp["end_period"]:
+        if pp_df["start_period"] != pp_df["end_period"]:
             # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
             passes = passes[
-                ((passes["period"] == pp["start_period"]) & (pp["start_game_clock_seconds"] >= passes["clock_seconds"]))
+                (
+                    (passes["period"] == pp_df["start_period"])
+                    & (pp_df["start_game_clock_seconds"] >= passes["clock_seconds"])
+                )
                 # or passes in the end_period with the clock above the end time of the PP
-                | ((passes["period"] == pp["end_period"]) & (passes["clock_seconds"] >= pp["end_game_clock_seconds"]))
+                | (
+                    (passes["period"] == pp_df["end_period"])
+                    & (passes["clock_seconds"] >= pp_df["end_game_clock_seconds"])
+                )
             ]
 
         else:
             # Take passes in the same period (start_period == end_period except for the one exception)
             # and PP-Start above current time and PP-END below current time
             passes = passes[
-                (passes["period"] == pp["start_period"])
-                & (pp["start_game_clock_seconds"] >= passes["clock_seconds"])
-                & (passes["clock_seconds"] >= pp["end_game_clock_seconds"])
+                (passes["period"] == pp_df["start_period"])
+                & (pp_df["start_game_clock_seconds"] >= passes["clock_seconds"])
+                & (passes["clock_seconds"] >= pp_df["end_game_clock_seconds"])
             ]
 
     passes = passes.join(roster_info, on="player_name").join(roster_info, on="player_name_2", rsuffix="_2")
