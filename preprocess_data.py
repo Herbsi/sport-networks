@@ -225,5 +225,36 @@ def build_networks(
     }
 
 
+def calculate_time(
+    game: Game,
+    pps: list[PowerPlay] | None = None,
+    play_by_play_data=pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE)),
+    power_play_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
+):
+    """Calculate total time in seconds passed in game during power_plays in pps.  If pps is None, return time during regular play."""
+    total_time = 3 * 20 * 60  # 3 periods of 20min in seconds
+    power_play_info = power_play_info[power_play_info["game_name"] == game.game]
+    power_play_info = power_play_info.loc[:, ["penalty_number", "start_game_clock_seconds", "end_game_clock_seconds"]]
+
+    if pps is not None:
+        power_play_info = power_play_info[power_play_info["penalty_number"].isin([pp.penalty_no for pp in pps])]
+
+    def pp_time(pp):
+        start = pp["start_game_clock_seconds"]
+        end = pp["end_game_clock_seconds"]
+        # NOTE: Man könnte auch bei beiden noch -1 machen.
+        if start >= end:
+            return start - end
+        else:
+            return start + (20 * 60 - end)
+
+    pp_total_time = power_play_info.apply(pp_time, axis="columns").sum()
+
+    if pps is not None:
+        return pp_total_time
+    else:
+        return total_time - pp_total_time  # regular_time
+
+
 if __name__ == "__main__":
     main()
