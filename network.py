@@ -1,7 +1,16 @@
 import networkx as nx
+import numpy as np
+from enum import Enum
 from typing import Any
 from collections.abc import Callable
 from preprocess_data import directed_to_undirected
+
+
+class Weight(Enum):
+    N_PASSES = "n_passes"
+    REL_PASSES = "rel_passes"
+    REC_DISTANCE = "rec_distance"
+    MAX_DISTANCE = "max_distance"  # NOTE: Currently unused
 
 
 def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
@@ -25,10 +34,13 @@ def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool =
 
     # Now, after removing other stuff, normalise edge weights.
     total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
+
     for u, v, n_passes in G.edges.data("n_passes"):
-        # Use reciprocal of passing fraction as weight.
-        # This way, lower weight means more passes between players, which is more easily interpreted as "close"
-        G.edges[u, v]["distance"] = total_passes / n_passes
+        # For convenience, add multiple "distance" measures to edge.
+        G.edges[u, v][Weight.N_PASSES.value] = n_passes
+        G.edges[u, v][Weight.REL_PASSES.value] = n_passes / total_passes
+        # NOTE: Distance measures are arguably not very meaningful.
+        G.edges[u, v][Weight.REC_DISTANCE.value] = total_passes / n_passes
 
     return G
 
@@ -39,9 +51,9 @@ def connectivity(G: nx.Graph | nx.DiGraph) -> float:
     return nx.average_node_connectivity(G)
 
 
-def assortativity(G: nx.Graph | nx.DiGraph) -> float:
+def assortativity(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES) -> float:
     # TODO: not sure if weight="distance" would make more sense here too
-    return nx.degree_assortativity_coefficient(G, weight="n_passes")
+    return nx.degree_assortativity_coefficient(G, weight=weight.value)
 
 
 def number_connected_components(G: nx.Graph | nx.DiGraph) -> int:
@@ -54,12 +66,29 @@ def number_connected_components(G: nx.Graph | nx.DiGraph) -> int:
         raise TypeError(f"Unsupported argument type {type(G)}.")
 
 
-def clustering(G: nx.Graph | nx.DiGraph) -> float:
-    return nx.average_clustering(G, weight="n_passes")  # TODO: I think weight="n_passes" is correct here, but not sure
+def clustering(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES) -> float:
+    return nx.average_clustering(G, weight=weight.value)
 
 
-def centrality(G: nx.Graph | nx.DiGraph, u=None) -> float:
-    return nx.closeness_centrality(G, u, distance="distance", wf_improved=False)
+def centrality(G: nx.Graph | nx.DiGraph, u=None, weight: Weight = Weight.N_PASSES) -> float:
+    return nx.closeness_centrality(G, u, distance=weight.value, wf_improved=False)
+
+
+def betweenness_centrality(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.REC_DISTANCE) -> dict:
+    # TODO: Julian hat das zwar erwähnt, aber die Größe verwendet auch weight als distance.
+    return nx.betweenness_centrality(G, weight=weight.value)
+
+
+def eigenvector_centrality(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES) -> dict:
+    return nx.eigenvector_centrality(G, weight=weight.value)
+
+
+def degree_mean(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES):
+    return np.mean(list(d for (_, d) in G.degree(weight=weight.value)))
+
+
+def degree_std(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES):
+    return np.std(list(d for (_, d) in G.degree(weight=weight.value)))
 
 
 # Disruption Features
