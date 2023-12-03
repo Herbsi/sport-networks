@@ -52,7 +52,7 @@ def connectivity(G: nx.Graph | nx.DiGraph) -> float:
 
 
 def assortativity(G: nx.Graph | nx.DiGraph, weight: Weight = Weight.N_PASSES) -> float:
-    # TODO: not sure if weight="distance" would make more sense here too
+    # Best I can tell, assortativity is invariant under scaling of edge weights; so, Weight.N_PASSES and Weight.REL_PASSES seem to give the same results.
     return nx.degree_assortativity_coefficient(G, weight=weight.value)
 
 
