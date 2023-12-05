@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import pickle
 
+from network import Weight
+
 import networkx as nx
 import pandas as pd
 
@@ -32,64 +34,47 @@ GAMES = [
     "2022-02-16 Switzerland at Finland",
 ]
 
+DATA_PATH = "./data/networks/passing"
+
 
 def main():
-    ################################################################################
-    # Actual Main code                                                             #
-    ################################################################################
-
-    # Count the various combinations encountered below.
-    empty_networks = 0
-    disconnected_networks = 0
-    disconnected_networks_pp = 0
-    connected_networks = 0
-    pp_count = 0
-    total_posibilities = 0
-
-    dir = Path("./data/networks")
+    dir = Path(DATA_PATH)
     dir.mkdir(parents=True, exist_ok=True)  # Create directory if it does not exist
 
     # Generate some combinations of potential networks.
-    # Some of them are empty,
+    # Some of them do not make sense, but build_networks returns None in that case
     # e.g. Venue.HOME, Situation.POWER_PLAY, PowerPlay(1) but Venue.HOME is PENALTY_KILL in that Power Play.
     for game, venue, (situation, pp) in itertools.product(
         GAMES,
         [Venue.HOME, Venue.AWAY],
         [(Situation.REGULAR, None)]
-        + [(Situation.POWER_PLAY, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)],
+        + [(Situation.POWER_PLAY, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)]
+        + [(Situation.PENALTY_KILL, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)],
     ):
         res = build_networks(Game(game), venue=venue, situation=situation, pp=pp)
         if res is None:
-            # Happens if there is for example no 7th PP in a game.
             continue
 
-        total_posibilities += 1
+        match (game, pp):
+            # These two result in 6 on 4 situations instead of 5 on 4
+            case ("2022-02-14 USA at Finland", PowerPlay(penalty_no=4)):
+                continue
+            case ("2022-02-08 Canada at USA", PowerPlay(penalty_no=7)):
+                continue
 
-        if pp is not None:
-            pp_count += 1
+        nw = res["position_pass_network"]
+        nw = process_graph_for_analysis(nw)
 
-        if res["position_pass_network"].number_of_nodes() == 0:
-            empty_networks += 1
-            continue
+        match situation:
+            case Situation.REGULAR:
+                file = Path(f"{game}_reg_{venue.value}.pickle")
+            case Situation.POWER_PLAY:
+                file = Path(f"{game}_{pp.penalty_no}_pp_{venue.value}.pickle")
+            case Situation.PENALTY_KILL:
+                file = Path(f"{game}_{pp.penalty_no}_pk_{venue.value}.pickle")
 
-        if res["position_pass_network"].number_of_nodes() < 5:
-            disconnected_networks += 1
-            if pp is not None:
-                disconnected_networks_pp += 1
-            continue
-
-        connected_networks += 1
-
-        # write to disk
-        file = Path(f"{game}_{venue.value}{f'_pp{pp.penalty_no}' if pp is not None else ''}.pickle")
         with open(dir / file, "wb") as f:
-            pickle.dump(res, f)
-
-    print(f"Connected: {connected_networks} / {total_posibilities}")
-    print(f"Empty Networks: {empty_networks} / {total_posibilities}")
-    print(f"Disconnected Networks: {disconnected_networks} / {total_posibilities}")
-    print(f"Empty Networks out of PP situations: {empty_networks} / {pp_count}")
-    print(f"Disconnected Networks out of PP situations: {disconnected_networks_pp} / {pp_count}")
+            pickle.dump(nw, f)
 
 
 def directed_to_undirected(digraph):
@@ -103,6 +88,38 @@ def directed_to_undirected(digraph):
                     digraph.edges[node, ngbr]["n_passes"] + digraph.edges[ngbr, node]["n_passes"]
                 )
     return graph
+
+
+def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
+    # Do not make undirected by default
+    # TODO: I am not sure what makes more sense for our analysis; Haka generally considered the graph as directed; so, put it behind a flag for now
+    if make_undirected:
+        G = directed_to_undirected(G)
+
+    # Remove the Goalie as he is rarely involved in passes
+    try:
+        G.remove_node("Goalie")
+    except nx.NetworkXError:
+        pass
+
+    # Remove loops because they conceptually do not make sense for our analyses
+    for u in G.nodes:
+        try:
+            G.remove_edge(u, u)
+        except nx.NetworkXError:
+            pass
+
+    # Now, after removing other stuff, normalise edge weights.
+    total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
+
+    for u, v, n_passes in G.edges.data("n_passes"):
+        # For convenience, add multiple "distance" measures to edge.
+        G.edges[u, v][Weight.N_PASSES.value] = n_passes
+        G.edges[u, v][Weight.REL_PASSES.value] = n_passes / total_passes
+        # NOTE: Distance measures are arguably not very meaningful.
+        G.edges[u, v][Weight.REC_DISTANCE.value] = total_passes / n_passes
+
+    return G
 
 
 class Venue(Enum):
@@ -134,8 +151,17 @@ class Game:
 
 
 class PowerPlay:
+    __match_args__ = "penalty_no"
+
     def __init__(self, penalty_no):
         self.penalty_no = penalty_no
+
+    def __eq__(self, other):
+        """Overrides the default implementation"""
+        if isinstance(other, PowerPlay):
+            return self.penalty_no == other.penalty_no
+
+        return False
 
 
 def build_networks(
@@ -153,16 +179,15 @@ def build_networks(
     """
     roster_info = pd.read_csv(game.roster_file, index_col=0)
     events = play_by_play_data[play_by_play_data["game_date"] == game.game_date]
-    match venue:
-        case venue.HOME:
-            events = events[events["team_name"] == game.home]
-        case venue.AWAY:
-            events = events[events["team_name"] == game.away]
 
-    passes = events[events["event"] == "Play"]
+    # This is the team we are interested in.
+    venue_team = game.home if venue == Venue.HOME else game.away
 
-    if situation is not None:
-        passes = passes[passes["situation_type"] == situation.value]
+    # Only take events of team we want.
+    events = events[events["team_name"] == venue_team]
+
+    # Filter for situations we want.
+    events = events[events["situation_type"] == situation.value]
 
     if pp is not None:
         # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
@@ -172,35 +197,53 @@ def build_networks(
                 (power_play_info["game_name"] == game.game) & (power_play_info["penalty_number"] == pp.penalty_no)
             ].iloc[0]
         except IndexError:
-            # TODO Return something more graceful.
             return None
+
+        # This is the team in power play
+        pp_team = pp_df["pp_team_name"]
+        # NOTE: These do not get passed as integers for some reason; and that makes me a bit worried.
+
+        # Two cases are valid:
+        # - PP Network and (venue_team == pp_team)
+        # - PK Network and (venue_team != pp_team)
+        # Any other situation, return None
+        match (situation, venue_team, pp_team):
+            case (Situation.POWER_PLAY, a, b) if a == b:
+                pass
+            case (Situation.PENALTY_KILL, a, b) if a != b:
+                pass
+            case _:
+                return None
 
         # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
         if pp_df["start_period"] != pp_df["end_period"]:
-            # Take passes that are either in the start_period and the clock is below the PP (clock is counting down)
-            passes = passes[
+            # Take events that are either in the start_period and the clock is below the PP (clock is counting down)
+            events = events[
                 (
-                    (passes["period"] == pp_df["start_period"])
-                    & (pp_df["start_game_clock_seconds"] >= passes["clock_seconds"])
+                    (events["period"] == pp_df["start_period"])
+                    & (pp_df["start_game_clock_seconds"] >= events["clock_seconds"])
                 )
-                # or passes in the end_period with the clock above the end time of the PP
+                # or events in the end_period with the clock above the end time of the PP
                 | (
-                    (passes["period"] == pp_df["end_period"])
-                    & (passes["clock_seconds"] >= pp_df["end_game_clock_seconds"])
+                    (events["period"] == pp_df["end_period"])
+                    & (events["clock_seconds"] >= pp_df["end_game_clock_seconds"])
                 )
             ]
 
         else:
-            # Take passes in the same period (start_period == end_period except for the one exception)
+            # Take events in the same period (start_period == end_period except for the one exception)
             # and PP-Start above current time and PP-END below current time
-            passes = passes[
-                (passes["period"] == pp_df["start_period"])
-                & (pp_df["start_game_clock_seconds"] >= passes["clock_seconds"])
-                & (passes["clock_seconds"] >= pp_df["end_game_clock_seconds"])
+            events = events[
+                (events["period"] == pp_df["start_period"])
+                & (pp_df["start_game_clock_seconds"] >= events["clock_seconds"])
+                & (events["clock_seconds"] >= pp_df["end_game_clock_seconds"])
             ]
 
+    passes = events[(events["event"] == "Play") & (events["event_successful"] == "t")]
     passes = passes.join(roster_info, on="player_name").join(roster_info, on="player_name_2", rsuffix="_2")
     passes = passes.loc[:, ["team_name", "player_name", "position", "player_name_2", "position_2"]]
+
+    shots = events[events["event"] == "Shot"]
 
     def create_graph(factor):
         # factor is either "position" or "player_name"
@@ -216,6 +259,9 @@ def build_networks(
                 axis=1,
             ),
             name=f"{game.game}_{venue.value}_{f'pp{pp.penalty_no}' if pp is not None else 'regular'}",
+            game=game,
+            pp=pp,
+            n_shots=len(shots),
         )
         return graph
 
@@ -254,6 +300,23 @@ def calculate_time(
         return pp_total_time
     else:
         return total_time - pp_total_time  # regular_time
+
+
+def read_networks(situation: Situation) -> list:
+    match situation:
+        case Situation.REGULAR:
+            files = Path(DATA_PATH).glob("*reg*")
+        case Situation.POWER_PLAY:
+            files = Path(DATA_PATH).glob("*pp*")
+        case Situation.PENALTY_KILL:
+            files = Path(DATA_PATH).glob("*pk*")
+
+    def files_gen():
+        for f in files:
+            with open(f, "rb") as f:
+                yield pickle.load(f)
+
+    return list(files_gen())
 
 
 if __name__ == "__main__":

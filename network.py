@@ -3,7 +3,6 @@ import numpy as np
 from enum import Enum
 from typing import Any
 from collections.abc import Callable
-from preprocess_data import directed_to_undirected
 
 
 class Weight(Enum):
@@ -11,38 +10,6 @@ class Weight(Enum):
     REL_PASSES = "rel_passes"
     REC_DISTANCE = "rec_distance"
     MAX_DISTANCE = "max_distance"  # NOTE: Currently unused
-
-
-def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
-    # Do not make undirected by default
-    # TODO: I am not sure what makes more sense for our analysis; Haka generally considered the graph as directed; so, put it behind a flag for now
-    if make_undirected:
-        G = directed_to_undirected(G)
-
-    # Remove the Goalie as he is rarely involved in passes
-    try:
-        G.remove_node("Goalie")
-    except nx.NetworkXError:
-        pass
-
-    # Remove loops because they conceptually do not make sense for our analyses
-    for u in G.nodes:
-        try:
-            G.remove_edge(u, u)
-        except nx.NetworkXError:
-            pass
-
-    # Now, after removing other stuff, normalise edge weights.
-    total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
-
-    for u, v, n_passes in G.edges.data("n_passes"):
-        # For convenience, add multiple "distance" measures to edge.
-        G.edges[u, v][Weight.N_PASSES.value] = n_passes
-        G.edges[u, v][Weight.REL_PASSES.value] = n_passes / total_passes
-        # NOTE: Distance measures are arguably not very meaningful.
-        G.edges[u, v][Weight.REC_DISTANCE.value] = total_passes / n_passes
-
-    return G
 
 
 # Topological Features
