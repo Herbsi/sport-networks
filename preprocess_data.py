@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-from datetime import date
-from enum import Enum
 import itertools
 import os
-from pathlib import Path
 import pickle
+from datetime import date
+from enum import Enum
+from pathlib import Path
 
 from network import Weight
 
@@ -193,7 +193,7 @@ def build_networks(
         # Find the unique* row in power_play_info corresponding to the current game and penalty_number in pp.
         # If it does not exist; just return None because there is no network to build.
         try:
-            pp_df = power_play_info[
+            pp_info = power_play_info[
                 (power_play_info["game_name"] == game.game) & (power_play_info["penalty_number"] == pp.penalty_no)
             ].iloc[0]
         except IndexError:
@@ -216,17 +216,17 @@ def build_networks(
                 return None
 
         # NOTE: Wrote custom logic to determine plays that happen as part of a PP because the time calculation stuff from the Data_Clean.ipynb notebook did not seem to work correctly; maybe I just made a mistake though.
-        if pp_df["start_period"] != pp_df["end_period"]:
+        if pp_info["start_period"] != pp_info["end_period"]:
             # Take events that are either in the start_period and the clock is below the PP (clock is counting down)
             events = events[
                 (
-                    (events["period"] == pp_df["start_period"])
-                    & (pp_df["start_game_clock_seconds"] >= events["clock_seconds"])
+                    (events["period"] == pp_info["start_period"])
+                    & (pp_info["start_game_clock_seconds"] >= events["clock_seconds"])
                 )
                 # or events in the end_period with the clock above the end time of the PP
                 | (
-                    (events["period"] == pp_df["end_period"])
-                    & (events["clock_seconds"] >= pp_df["end_game_clock_seconds"])
+                    (events["period"] == pp_info["end_period"])
+                    & (events["clock_seconds"] >= pp_info["end_game_clock_seconds"])
                 )
             ]
 
@@ -234,9 +234,9 @@ def build_networks(
             # Take events in the same period (start_period == end_period except for the one exception)
             # and PP-Start above current time and PP-END below current time
             events = events[
-                (events["period"] == pp_df["start_period"])
-                & (pp_df["start_game_clock_seconds"] >= events["clock_seconds"])
-                & (events["clock_seconds"] >= pp_df["end_game_clock_seconds"])
+                (events["period"] == pp_info["start_period"])
+                & (pp_info["start_game_clock_seconds"] >= events["clock_seconds"])
+                & (events["clock_seconds"] >= pp_info["end_game_clock_seconds"])
             ]
 
     passes = events[(events["event"] == "Play") & (events["event_successful"] == "t")]
@@ -259,9 +259,10 @@ def build_networks(
                 axis=1,
             ),
             name=f"{game.game}_{venue.value}_{f'pp{pp.penalty_no}' if pp is not None else 'regular'}",
-            game=game,
-            pp=pp,
-            n_shots=len(shots),
+            game=game.game,
+            venue=venue.value,
+            pp_no=pp.penalty_no if pp is not None else None,
+           n_shots=len(shots),
         )
         return graph
 
