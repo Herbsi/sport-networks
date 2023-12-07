@@ -200,7 +200,7 @@ def build_networks(
             return None
 
         # This is the team in power play
-        pp_team = pp_df["pp_team_name"]
+        pp_team = pp_info["pp_team_name"]
         # NOTE: These do not get passed as integers for some reason; and that makes me a bit worried.
 
         # Two cases are valid:
