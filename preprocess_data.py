@@ -6,6 +6,7 @@ import pickle
 from datetime import date
 from enum import Enum
 from pathlib import Path
+from typing import List
 
 from network import Weight
 
@@ -259,10 +260,10 @@ def build_networks(
                 axis=1,
             ),
             name=f"{game.game}_{venue.value}_{f'pp{pp.penalty_no}' if pp is not None else 'regular'}",
-            game=game.game,
-            venue=venue.value,
-            pp_no=pp.penalty_no if pp is not None else None,
-           n_shots=len(shots),
+            game=game,
+            venue=venue,
+            pp=pp,
+            n_shots=len(shots),
         )
         return graph
 
@@ -274,17 +275,17 @@ def build_networks(
 
 def calculate_time(
     game: Game,
-    pps: list[PowerPlay] | None = None,
+    pps: List[PowerPlay] | None = None,
     play_by_play_data=pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE)),
-    power_play_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
+    pp_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
 ):
-    """Calculate total time in seconds passed in game during power_plays in pps.  If pps is None, return time during regular play."""
+    """Calculate total time in seconds passed in game during power_plays in pps. If pps is None, return time during regular play."""
     total_time = 3 * 20 * 60  # 3 periods of 20min in seconds
-    power_play_info = power_play_info[power_play_info["game_name"] == game.game]
-    power_play_info = power_play_info.loc[:, ["penalty_number", "start_game_clock_seconds", "end_game_clock_seconds"]]
+    pp_info = pp_info[pp_info["game_name"] == game.game]
+    pp_info = pp_info.loc[:, ["penalty_number", "start_game_clock_seconds", "end_game_clock_seconds"]]
 
     if pps is not None:
-        power_play_info = power_play_info[power_play_info["penalty_number"].isin([pp.penalty_no for pp in pps])]
+        pp_info = pp_info[pp_info["penalty_number"].isin([pp.penalty_no for pp in pps])]
 
     def pp_time(pp):
         start = pp["start_game_clock_seconds"]
@@ -295,7 +296,7 @@ def calculate_time(
         else:
             return start + (20 * 60 - end)
 
-    pp_total_time = power_play_info.apply(pp_time, axis="columns").sum()
+    pp_total_time = pp_info.apply(pp_time, axis="columns").sum()
 
     if pps is not None:
         return pp_total_time
@@ -315,7 +316,7 @@ def read_networks(situation: Situation) -> list:
     def files_gen():
         for f in files:
             with open(f, "rb") as f:
-                yield pickle.load(f)
+                yield pickle.load(f)  # all types (e.g. Game) in the pickle file need to be in scope for this to work
 
     return list(files_gen())
 
