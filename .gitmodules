@@ -1,3 +1,6 @@
 [submodule "external/Big-Data-Cup-2022"]
 	path = external/Big-Data-Cup-2022
 	url = https://github.com/Herbsi/Big-Data-Cup-2022
+[submodule "report"]
+	path = report
+	url = https://git@git.overleaf.com/6570585c5a1d79ad332f68af
