@@ -249,8 +249,15 @@ def build_networks(
     def create_graph(factor):
         # factor is either "position" or "player_name"
         passes_by_factor = passes.loc[:, [factor, f"{factor}_2"]].value_counts().reset_index()
+        match situation:
+            case Situation.REGULAR:
+                name = f"{game.game}_reg_{venue.value}"
+            case Situation.POWER_PLAY:
+                name = f"{game.game}_{pp.penalty_no}_pp_{venue.value}"
+            case Situation.PENALTY_KILL:
+                name = f"{game.game}_{pp.penalty_no}_pk_{venue.value}"
 
-        graph = nx.DiGraph(
+        g = nx.DiGraph(
             passes_by_factor.apply(
                 lambda row: (
                     row[factor],
@@ -258,14 +265,26 @@ def build_networks(
                     {"n_passes": row["count"]},
                 ),
                 axis=1,
-            ),
-            name=f"{game.game}_{venue.value}_{f'pp{pp.penalty_no}' if pp is not None else 'regular'}",
-            game=game,
-            venue=venue,
-            pp=pp,
-            n_shots=len(shots),
+            )
         )
-        return graph
+        g.name = name
+        g.game = game
+        g.venue = venue
+        g.situation = situation
+        g.pp = pp
+        g.n_shots = len(shots)
+        g.n_passes = g.size(weight=Weight.N_PASSES.value)
+        g.time = calculate_time(game, pps=[pp]) if pp is not None else calculate_time(game)
+        if situation == Situation.REGULAR:
+            final_event = events.iloc[-1]
+            g.home_score = final_event["goals_for"]
+            g.away_score = final_event["goals_against"]
+            if final_event["venue"] == "away":
+                g.home_score, g.away_score = g.away_score, g.home_score
+            g.winner = "home" if g.home_score > g.away_score else "away" if g.away_score > g.home_score else "tie"
+            g.win = 1 if g.winner == venue.value else 0
+
+        return g
 
     return {
         "position_pass_network": create_graph("position"),
