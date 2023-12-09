@@ -8,10 +8,10 @@ from enum import Enum
 from pathlib import Path
 from typing import List
 
-from network import Weight
-
 import networkx as nx
 import pandas as pd
+
+from network import Weight
 
 # Matching dictionary for team names between events and tracking data
 TEAM_NAMES = {
@@ -36,91 +36,6 @@ GAMES = [
 ]
 
 DATA_PATH = "./data/networks/passing"
-
-
-def main():
-    dir = Path(DATA_PATH)
-    dir.mkdir(parents=True, exist_ok=True)  # Create directory if it does not exist
-
-    # Generate some combinations of potential networks.
-    # Some of them do not make sense, but build_networks returns None in that case
-    # e.g. Venue.HOME, Situation.POWER_PLAY, PowerPlay(1) but Venue.HOME is PENALTY_KILL in that Power Play.
-    for game, venue, (situation, pp) in itertools.product(
-        GAMES,
-        [Venue.HOME, Venue.AWAY],
-        [(Situation.REGULAR, None)]
-        + [(Situation.POWER_PLAY, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)]
-        + [(Situation.PENALTY_KILL, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)],
-    ):
-        res = build_networks(Game(game), venue=venue, situation=situation, pp=pp)
-        if res is None:
-            continue
-
-        match (game, pp):
-            # These two result in 6 on 4 situations instead of 5 on 4
-            case ("2022-02-14 USA at Finland", PowerPlay(penalty_no=4)):
-                continue
-            case ("2022-02-08 Canada at USA", PowerPlay(penalty_no=7)):
-                continue
-
-        nw = res["position_pass_network"]
-        nw = process_graph_for_analysis(nw)
-
-        match situation:
-            case Situation.REGULAR:
-                file = Path(f"{game}_reg_{venue.value}.pickle")
-            case Situation.POWER_PLAY:
-                file = Path(f"{game}_{pp.penalty_no}_pp_{venue.value}.pickle")
-            case Situation.PENALTY_KILL:
-                file = Path(f"{game}_{pp.penalty_no}_pk_{venue.value}.pickle")
-
-        with open(dir / file, "wb") as f:
-            pickle.dump(nw, f)
-
-
-def directed_to_undirected(digraph):
-    # From: https://stackoverflow.com/questions/56169907/networkx-change-weighted-directed-graph-to-undirected
-    # Yes, I couldn't be bothered to write this simple loop myself
-    graph = digraph.to_undirected()
-    for node in digraph:
-        for ngbr in nx.neighbors(digraph, node):
-            if node in nx.neighbors(digraph, ngbr):
-                graph.edges[node, ngbr]["n_passes"] = (
-                    digraph.edges[node, ngbr]["n_passes"] + digraph.edges[ngbr, node]["n_passes"]
-                )
-    return graph
-
-
-def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
-    # Do not make undirected by default
-    # TODO: I am not sure what makes more sense for our analysis; Haka generally considered the graph as directed; so, put it behind a flag for now
-    if make_undirected:
-        G = directed_to_undirected(G)
-
-    # Remove the Goalie as he is rarely involved in passes
-    try:
-        G.remove_node("Goalie")
-    except nx.NetworkXError:
-        pass
-
-    # Remove loops because they conceptually do not make sense for our analyses
-    for u in G.nodes:
-        try:
-            G.remove_edge(u, u)
-        except nx.NetworkXError:
-            pass
-
-    # Now, after removing other stuff, normalise edge weights.
-    total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
-
-    for u, v, n_passes in G.edges.data("n_passes"):
-        # For convenience, add multiple "distance" measures to edge.
-        G.edges[u, v][Weight.N_PASSES.value] = n_passes
-        G.edges[u, v][Weight.REL_PASSES.value] = n_passes / total_passes
-        # NOTE: Distance measures are arguably not very meaningful.
-        G.edges[u, v][Weight.REC_DISTANCE.value] = total_passes / n_passes
-
-    return G
 
 
 class Venue(Enum):
@@ -163,6 +78,99 @@ class PowerPlay:
             return self.penalty_no == other.penalty_no
 
         return False
+
+
+def directed_to_undirected(digraph):
+    # From: https://stackoverflow.com/questions/56169907/networkx-change-weighted-directed-graph-to-undirected
+    # Yes, I couldn't be bothered to write this simple loop myself
+    graph = digraph.to_undirected()
+    for node in digraph:
+        for ngbr in nx.neighbors(digraph, node):
+            if node in nx.neighbors(digraph, ngbr):
+                graph.edges[node, ngbr]["n_passes"] = (
+                    digraph.edges[node, ngbr]["n_passes"] + digraph.edges[ngbr, node]["n_passes"]
+                )
+    return graph
+
+
+def calculate_time(
+    game: Game,
+    pps: List[PowerPlay] | None = None,
+    pp_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
+):
+    """Calculate total time in seconds passed in game during power_plays in pps. If pps is None, return time during regular play."""
+    total_time = 3 * 20 * 60  # 3 periods of 20min in seconds
+    pp_info = pp_info[pp_info["game_name"] == game.game]
+    pp_info = pp_info.loc[:, ["penalty_number", "start_game_clock_seconds", "end_game_clock_seconds"]]
+
+    if pps is not None:
+        pp_info = pp_info[pp_info["penalty_number"].isin([pp.penalty_no for pp in pps])]
+
+    def pp_time(pp):
+        start = pp["start_game_clock_seconds"]
+        end = pp["end_game_clock_seconds"]
+        # NOTE: Man könnte auch bei beiden noch -1 machen.
+        if start >= end:
+            return start - end
+        else:
+            return start + (20 * 60 - end)
+
+    pp_total_time = pp_info.apply(pp_time, axis="columns").sum()
+
+    if pps is not None:
+        return pp_total_time
+    else:
+        return total_time - pp_total_time  # regular_time
+
+
+def read_networks(situation: Situation) -> list:
+    match situation:
+        case Situation.REGULAR:
+            files = Path(DATA_PATH).glob("*reg*")
+        case Situation.POWER_PLAY:
+            files = Path(DATA_PATH).glob("*pp*")
+        case Situation.PENALTY_KILL:
+            files = Path(DATA_PATH).glob("*pk*")
+
+    def files_gen():
+        for f in files:
+            with open(f, "rb") as f:
+                yield pickle.load(f)  # all types (e.g. Game) in the pickle file need to be in scope for this to work
+
+    return files_gen()
+
+
+def process_graph_for_analysis(G: nx.Graph | nx.DiGraph, make_undirected: bool = False):
+    # Do not make undirected by default
+    # TODO: I am not sure what makes more sense for our analysis; Haka generally considered the graph as directed; so, put it behind a flag for now
+    if make_undirected:
+        G = directed_to_undirected(G)
+
+    # Remove the Goalie as he is rarely involved in passes
+    try:
+        G.remove_node("Goalie")
+    except nx.NetworkXError:
+        pass
+
+    # Remove loops because they conceptually do not make sense for our analyses
+    for u in G.nodes:
+        try:
+            G.remove_edge(u, u)
+        except nx.NetworkXError:
+            pass
+
+    # Now, after removing other stuff, normalise edge weights.
+    total_passes = sum(w for (_, _, w) in G.edges.data("n_passes"))
+
+    for u, v, n_passes in G.edges.data("n_passes"):
+        # For convenience, add multiple "distance" measures to edge.
+        G.edges[u, v][Weight.N_PASSES.value] = n_passes
+        G.edges[u, v][Weight.REL_PASSES.value] = n_passes / total_passes
+        # NOTE: Distance measures are arguably not very meaningful.
+        G.edges[u, v][Weight.REC_DISTANCE.value] = total_passes / n_passes
+        G.edges[u, v][Weight.PASS_FREQUENCY.value] = n_passes / G.time
+
+    return G
 
 
 def build_networks(
@@ -292,52 +300,44 @@ def build_networks(
     }
 
 
-def calculate_time(
-    game: Game,
-    pps: List[PowerPlay] | None = None,
-    play_by_play_data=pd.read_csv(os.path.join(TRACKING_DIR, PLAY_BY_PLAY_DATA_FILE)),
-    pp_info=pd.read_csv(os.path.join(PBP_DIR, POWER_PLAY_INFO_FILE), comment="#"),
-):
-    """Calculate total time in seconds passed in game during power_plays in pps. If pps is None, return time during regular play."""
-    total_time = 3 * 20 * 60  # 3 periods of 20min in seconds
-    pp_info = pp_info[pp_info["game_name"] == game.game]
-    pp_info = pp_info.loc[:, ["penalty_number", "start_game_clock_seconds", "end_game_clock_seconds"]]
+def main():
+    dir = Path(DATA_PATH)
+    dir.mkdir(parents=True, exist_ok=True)  # Create directory if it does not exist
 
-    if pps is not None:
-        pp_info = pp_info[pp_info["penalty_number"].isin([pp.penalty_no for pp in pps])]
+    # Generate some combinations of potential networks.
+    # Some of them do not make sense, but build_networks returns None in that case
+    # e.g. Venue.HOME, Situation.POWER_PLAY, PowerPlay(1) but Venue.HOME is PENALTY_KILL in that Power Play.
+    for game, venue, (situation, pp) in itertools.product(
+        GAMES,
+        [Venue.HOME, Venue.AWAY],
+        [(Situation.REGULAR, None)]
+        + [(Situation.POWER_PLAY, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)]
+        + [(Situation.PENALTY_KILL, PowerPlay(penalty_no)) for penalty_no in range(1, MAX_PENALTY_NUMBER + 1)],
+    ):
+        res = build_networks(Game(game), venue=venue, situation=situation, pp=pp)
+        if res is None:
+            continue
 
-    def pp_time(pp):
-        start = pp["start_game_clock_seconds"]
-        end = pp["end_game_clock_seconds"]
-        # NOTE: Man könnte auch bei beiden noch -1 machen.
-        if start >= end:
-            return start - end
-        else:
-            return start + (20 * 60 - end)
+        match (game, pp):
+            # These two result in 6 on 4 situations instead of 5 on 4
+            case ("2022-02-14 USA at Finland", PowerPlay(penalty_no=4)):
+                continue
+            case ("2022-02-08 Canada at USA", PowerPlay(penalty_no=7)):
+                continue
 
-    pp_total_time = pp_info.apply(pp_time, axis="columns").sum()
+        nw = res["position_pass_network"]
+        nw = process_graph_for_analysis(nw)
 
-    if pps is not None:
-        return pp_total_time
-    else:
-        return total_time - pp_total_time  # regular_time
+        match situation:
+            case Situation.REGULAR:
+                file = Path(f"{game}_reg_{venue.value}.pickle")
+            case Situation.POWER_PLAY:
+                file = Path(f"{game}_{pp.penalty_no}_pp_{venue.value}.pickle")
+            case Situation.PENALTY_KILL:
+                file = Path(f"{game}_{pp.penalty_no}_pk_{venue.value}.pickle")
 
-
-def read_networks(situation: Situation) -> list:
-    match situation:
-        case Situation.REGULAR:
-            files = Path(DATA_PATH).glob("*reg*")
-        case Situation.POWER_PLAY:
-            files = Path(DATA_PATH).glob("*pp*")
-        case Situation.PENALTY_KILL:
-            files = Path(DATA_PATH).glob("*pk*")
-
-    def files_gen():
-        for f in files:
-            with open(f, "rb") as f:
-                yield pickle.load(f)  # all types (e.g. Game) in the pickle file need to be in scope for this to work
-
-    return list(files_gen())
+        with open(dir / file, "wb") as f:
+            pickle.dump(nw, f)
 
 
 if __name__ == "__main__":

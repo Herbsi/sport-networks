@@ -1,8 +1,9 @@
-import networkx as nx
-import numpy as np
+from collections.abc import Callable
 from enum import Enum
 from typing import Any
-from collections.abc import Callable
+
+import networkx as nx
+import numpy as np
 
 
 class Weight(Enum):
@@ -10,6 +11,7 @@ class Weight(Enum):
     REL_PASSES = "rel_passes"
     REC_DISTANCE = "rec_distance"
     MAX_DISTANCE = "max_distance"  # NOTE: Currently unused
+    PASS_FREQUENCY = "pass_frequency"
 
 
 # Topological Features
