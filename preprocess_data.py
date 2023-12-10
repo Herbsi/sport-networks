@@ -291,6 +291,8 @@ def build_networks(
                 g.home_score, g.away_score = g.away_score, g.home_score
             g.winner = "home" if g.home_score > g.away_score else "away" if g.away_score > g.home_score else "tie"
             g.win = 1 if g.winner == venue.value else 0
+        elif situation == Situation.POWER_PLAY:
+            g.goal = {"t": 1, "f": 0}[pp_info["goal"].strip()]
 
         return g
 
