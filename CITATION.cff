@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Hehli"
+  given-names: "Fabio"
+- family-names: "Höhenberger"
+  given-names: "Herwig"
+title: Pass Networks under Player Imbalance
+version: 1.0.0
+date-released: 2023-12-22
+url: "https://github.com/Herbsi/sport-networks"
